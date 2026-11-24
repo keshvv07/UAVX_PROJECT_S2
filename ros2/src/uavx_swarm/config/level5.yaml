@@ -1,0 +1,105 @@
+# LEVEL 5 - two UAVs + a relay: an always-connected swarm, and a ferry only for the far PoI
+#
+#   bash ros2/run_level.sh 5 [--gui]          control panel: http://localhost:8089
+#
+# The operating rules this level is built on (policy: connected, mission_plan.py):
+#
+#   1. The UAVs stay interconnected: every UAV keeps a multi-hop route to the GCS, and the
+#      only one ever allowed out of it is a surveyor on a ferry sortie.
+#   2. Reports travel over the multi-hop aerial network, live - not by ferrying. The
+#      surveyor is only sent to a PoI once the relay that keeps it connected there is on
+#      station; until then it waits (STAGE) inside coverage.
+#   3. Ferry mode only for a PoI the chain cannot reach. The GCS estimates the distance as
+#      the relays a live link would need; with two UAVs one can relay, so a PoI needing two
+#      or more is a FERRY target (P4 here, about 240 m out). The relay still goes as far
+#      towards it as it can and holds its anchor; the surveyor flies out alone, surveys,
+#      keeps the report on board, flies back to the handoff point inside the relay's range
+#      and hands the report over.
+#   4. While P4 is being ferried it belongs to that one UAV: nobody else is given it, no
+#      second sortie starts, and the GCS does not write the surveyor off for being silent
+#      until the sortie is overdue.
+#
+# The geometry on quake_town (GCS at the origin, 100 m radio, buildings shadow it):
+#   P1  77 m   direct                  -> live, no relay
+#   P2  89 m   behind B7/B2            -> live, 1 relay (the GCS cannot see it directly)
+#   P3 146 m   beyond the GCS range    -> live, 1 relay
+#   P4 ~240 m  beyond relay + surveyor -> FERRY (needs more relays than the fleet has)
+#
+# No disturbance is scripted: the level runs clean on its own. Disturbances come only from
+# the operator - the control console's kill switch, outage, packet loss, bit error rate,
+# jamming, battery and new-PoI controls - and every one is logged as a DISTURBANCE and scored. The swarm's answers:
+#   relay radio outage / jamming   surveyor holds, then pulls back towards the GCS; the GCS
+#                                  waits fail_timeout_s before calling the relay lost
+#   relay killed or sent home      chain re-planned without it; the surveyor's work becomes
+#                                  a direct or ferry job, never two UAVs on one PoI
+#   surveyor killed                its PoI goes back to the queue; the relay becomes surveyor
+#   new PoI (panel shift-click)    estimated like any other: live if one relay reaches it,
+#                                  otherwise a ferry sortie, emergencies (>= 4) first
+level: 5
+name: two_uavs_relay
+policy: connected
+description: >
+  Two UAVs on the connected-chain policy: one surveys while the other holds the relay that
+  keeps it in contact, every report is carried home live over the multi-hop network, and
+  only the PoI beyond the chain's reach (P4) is ferried - by one UAV, while the relay holds
+  its anchor and waits for the handover. Disturbances are injected by the operator.
+map: quake_town
+duration_s: 900
+uavs:
+  - id: uav1
+    pad_m: [-25.0, -12.5]
+    cruise_alt_m: 25.0
+    color: [0.1, 0.6, 1.0]
+  - id: uav2
+    pad_m: [-25.0, 12.5]
+    cruise_alt_m: 45.0
+    color: [1.0, 0.55, 0.0]
+components: [companion, poi_detector, radio_net, gcs, scenario_manager, control_panel, pov_viewer, mission_monitor]
+mission:
+  mode: gcs
+companion:
+  survey_s: 15.0
+  leash_hold_s: 3.0            # route to the GCS gone this long: stop where it is
+  leash_retreat_s: 20.0        # ... this long: fly back towards the GCS until it returns
+  ferry_deliver_s: 25.0
+relay:
+  relay_alt_m: 45.0            # 20 m above the 25 m surveyor: passing under a relay is safe
+  min_planned_pdr: 0.85
+gcs_logic:
+  coverage: false              # a PoI list, not an area sweep: this level is about the chain
+  max_relays: 1
+  emergency_priority: 4        # an operator's emergency PoI pre-empts live work in progress
+  speed_mps: 5.0
+  fail_timeout_s: 20.0         # outlasts a typical outage, so a relay is not written off for one
+  lost_timeout_s: 90.0
+  replan_interval_s: 2.0       # the chain gate opens within a couple of seconds of "on station"
+  ferry_margin: 1.5            # a sortie is overdue after 1.5 x its estimate ...
+  ferry_grace_s: 45.0          # ... plus 45 s; only then is the ferrying UAV declared lost
+  idle_park_s: 60.0            # nothing to do for a minute: land and wait on the pad
+  poi_window_s: 300.0          # stay out until 300 s so the operator can drop new PoIs
+pois:
+  - {id: P1, pos_m: [80.0, -25.0], reported_m: [74.0, -20.0], priority: 2, survey_s: 15.0, appear_s: 0.0}
+  - {id: P2, pos_m: [78.0, 35.0], reported_m: [84.0, 30.0], priority: 2, survey_s: 15.0, appear_s: 0.0}
+  - {id: P3, pos_m: [150.0, -10.0], reported_m: [146.0, -4.0], priority: 3, survey_s: 15.0, appear_s: 0.0}
+  - {id: P4, pos_m: [235.0, -45.0], reported_m: [231.0, -41.0], priority: 2, survey_s: 15.0, appear_s: 45.0}
+pass:
+  all_landed: true
+  pad_error_m: 2.5
+  max_speed_mps: 5.5
+  min_separation_m: 20.0
+  pois_completed: all
+  pois_detected: all
+  reports_at_gcs: all
+  geolocation_error_m: 3.0
+  live_report_latency_s: 10.0
+  connected_report_latency_s: 10.0   # rule 2: every report found on the network home in 10 s
+  relayed_reports_min: 1       # P3 (and P4's handover) came home through uav2, not in uav1's pocket
+  relays_on_station_min: 1
+  max_report_hops: 3
+  ferry_pois: [P4]             # rule 3: the far PoI is surveyed out of range and handed over
+  ferry_delivered: true
+  max_concurrent_ferries: 1    # rule 4: one UAV on a sortie at a time
+  single_owner: true           # rule 4: no PoI is ever flown by two UAVs at once
+  network_connectivity_min: 0.95   # rule 1: off a sortie, a multi-hop route >= 95 % of the time
+  comm_range_limit: true
+  disturbances_handled: if_any # every operator injection handled; a clean run passes too

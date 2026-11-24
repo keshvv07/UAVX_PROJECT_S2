@@ -1,0 +1,172 @@
+# GRAND CHALLENGE 1 - the organisers' forest search mission
+#
+#   bash ros2/run_level.sh gc1 [--gui] [--seed N]
+#   control panel: http://localhost:8089
+#
+# The mission the PUSHPAK Grand Challenge 1 technical session specifies, on the organisers'
+# own map. Every number below that is theirs is marked with the question it comes from.
+#
+#   search area ................ 500 m x 500 m                              (Q6)
+#   endurance .................. 20 minutes, and the planner adapts if it changes (Q7, Q8)
+#   speed ...................... 10 m/s recommended                         (Q12)
+#   inter-UAV radio range ...... 100 m, hard                                (Q13)
+#   PoI report to the GCS ...... 10 s from detection                        (Q23)
+#   sensors .................... GPS + camera, both mandatory               (Q14)
+#   altitude, FOV, fleet size .. the team's call, to be justified          (Q10, Q17, Q18)
+#   PoIs ....................... appear at their own times during the run   (Q19, Q20)
+#   disturbances ............... UAV failures and comms degradation, injected live from the
+#                                control console only                       (Q31-Q35)
+#
+# Why five UAVs (Q10, Q44 - more is explicitly not better). The geometry decides it:
+#
+#   GCS mast -> near tree line    112 m   1 relay for a live link
+#   GCS mast -> area centre       360 m   4 relays
+#   GCS mast -> far corner        664 m   7 relays
+#
+# A live chain to the far corner is unaffordable at any sensible fleet size, and a fleet
+# big enough to try would fail Q44 on its own terms. Five is what covers the area inside
+# one battery with four sweeping surveyors while one UAV holds the chain that reaches into
+# the forest - and the reports from deeper in are ferried to that chain rather than carried
+# all the way home. See ros2/README.md, "Communication strategy", for the arithmetic.
+#
+# Flight levels: surveyors sweep at 35 m (a 48 m camera swath, 34 m lanes), relays hold
+# 55 m so a relay on station is never the reason a separation minimum is broken, and each
+# UAV transits at its own height so five aircraft can leave one apron safely.
+level: 5
+name: gc1_forest_search
+description: >
+  Five UAVs search the organisers' 500 m x 500 m forest for ten Points of Interest that
+  appear during the mission, with one UAV holding a relay chain into the search area,
+  multi-hop reporting through it and a partial data ferry from the far sectors. No
+  disturbance is scripted or drawn: UAV kill, low battery, radio outage, packet loss, bit
+  errors, jamming and new PoIs are injected by the evaluator from the control console.
+map: forest_rescue
+world: uavx_forest
+seed: random
+duration_s: 1800
+panel_port: 8089
+radio_backend: internal
+
+# The organisers' ground station: the antenna is on the mast beside the shelter.
+gcs:
+  id: gcs
+  position_m: [-359.0, -26.0, 10.0]
+
+# Q12: 10 m/s is recommended rather than fixed, so the speed lives with the scenario and
+# the earlier levels keep the 5 m/s they are scored against.
+ap_params:
+  WP_SPD: 10
+  WP_SPD_UP: 3.0
+  WP_SPD_DN: 2.0
+  WP_ACC: 3.0
+  LOIT_SPEED_MS: 10
+  RTL_SPEED_MS: 10
+  FENCE_RADIUS: 900          # covers the far corner, 664 m from the pads
+
+# Five UAVs on the organisers' apron (the row nearest the forest), each transiting at its
+# own height. Roles are not fixed here: the GCS decides at run time who sweeps and who
+# relays, and re-decides whenever the fleet changes.
+uavs:
+  - {id: uav1, pad_m: [-356.0, -15.0], cruise_alt_m: 30.0, color: [0.10, 0.60, 1.00]}
+  - {id: uav2, pad_m: [-356.0, -9.0],  cruise_alt_m: 34.0, color: [1.00, 0.55, 0.00]}
+  - {id: uav3, pad_m: [-356.0, -3.0],  cruise_alt_m: 38.0, color: [0.20, 0.80, 0.30]}
+  - {id: uav4, pad_m: [-356.0, 3.0],   cruise_alt_m: 42.0, color: [0.85, 0.30, 0.85]}
+  - {id: uav5, pad_m: [-356.0, 9.0],   cruise_alt_m: 46.0, color: [0.95, 0.85, 0.20]}
+
+components: [companion, poi_detector, radio_net, gcs, scenario_manager, control_panel, pov_viewer, mission_monitor]
+
+mission:
+  mode: gcs
+
+companion:
+  survey_s: 20.0
+  cruise_speed_mps: 10.0
+  obstacle_clearance_m: 8.0
+  separation_m: 25.0
+  sweep_overlap: 0.3
+  sweep_arrival_m: 8.0
+  ferry_after_s: 45.0          # a report older than this earns a round trip to the chain
+  ferry_deliver_s: 25.0
+  lost_link_rth_s: 600.0       # out of contact is normal out there, not a reason to go home
+  battery:
+    endurance_min: 20.0        # Q7; Q8: change this one number and every decision adapts
+    critical_pct: 20.0
+    reserve_pct: 8.0
+  recharge:                    # Q7 against Q19: a 20 min aircraft, PoIs appearing for longer
+    enabled: true
+    pad_s: 90.0
+    max_cycles: 2
+
+routing:                       # ETX distance-vector (routing.py)
+  window_s: 5.0
+  hysteresis: 0.15
+  min_link_pdr: 0.7
+  weak_link_penalty: 10.0
+  max_hops: 6
+
+relay:                         # relay anchor geometry (relay_plan.py)
+  relay_alt_m: 55.0
+  min_planned_pdr: 0.85
+  spacing_safety: 0.9
+  min_battery_pct: 35.0
+  handoff_margin: 0.85
+
+gcs_logic:
+  speed_mps: 10.0
+  coverage: true
+  sectors: 4                   # four compact 250 m x 250 m quadrants, nearest the GCS first
+  survey_alt_m: 35.0
+  sweep_overlap: 0.3
+  base_relays: 1               # quiet sweeping: one UAV holds the chain into the forest
+  max_relays: 4                # an emergency turns the rest of the fleet into its escort
+  min_surveyors: 1
+  escort_priority: 4
+  match_radius_m: 25.0
+  fail_timeout_s: 10.0
+  lost_timeout_s: 150.0        # most of the area is out of range: be slow to write a UAV off
+  min_battery_pct: 30.0
+  poi_window_s: 760.0
+  mission_time_s: 1500.0
+  replan_interval_s: 10.0
+
+# Q19/Q20: the PoI field is drawn the way the organisers draw theirs - ten sites inside the
+# search area, clear of the trunks, 15 m apart, three there from the start and the rest
+# appearing through the first 700 s. `--seed N` replays a particular field; swap this block
+# for a `pois:` list to fly the organisers' published positions instead.
+targets:
+  count: 10
+  at_start: 3
+  appear_window_s: [30.0, 700.0]
+  min_separation_m: 15.0
+  min_tree_m: 6.0
+  priority: [1, 3]
+  survey_s: 20.0
+  report_offset_m: [3.0, 8.0]
+  inset_m: 15.0
+  prefix: T
+
+# Q31-Q35: no disturbance is scheduled or drawn here, and the swarm has no code that makes
+# one. UAV kill, comms degradation (outage, loss, bit errors, jamming), battery and new
+# PoIs are injected live by the evaluator from the control console, http://localhost:8089.
+
+pass:
+  all_landed: true
+  allow_failure_of: injected
+  pad_error_m: 3.0
+  max_speed_mps: 11.0          # Q12: 10 m/s recommended, measured on Gazebo ground truth
+  max_alt_m: 100.0
+  min_separation_m: 20.0
+  endurance_respected: true    # Q7: nobody flies past its own endurance
+  comm_range_limit: true       # Q13: no link used beyond 100 m
+  coverage_fraction_min: 0.9   # Q48: the area really was surveyed
+  sectors_covered: all
+  pois_detected: all           # Q14: found by camera, not by knowing where they were
+  pois_completed: all
+  geolocation_error_m: 4.0
+  reports_at_gcs: all
+  live_report_latency_s: 10.0  # Q23, where a live link existed at the moment of detection
+  ferry_delivered: true        # and everything else arrived by ferry or relay
+  multi_hop_reports_min: 1     # at least one report came home through another UAV
+  relays_on_station_min: 1
+  max_report_hops: 6
+  disturbances_handled: if_any # every console injection handled; a clean run passes too
