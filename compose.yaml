@@ -1,0 +1,20 @@
+services:
+  sim:
+    image: uavx-stage2:local
+    platform: linux/amd64
+    build:
+      context: .
+      args:
+        BUILD_JOBS: ${BUILD_JOBS:-4}
+    init: true
+    shm_size: "2gb"
+    ports:
+      - "127.0.0.1:8089:8089"
+    volumes:
+      - runs:/home/uavx/uavx_runs
+    environment:
+      LIBGL_ALWAYS_SOFTWARE: "1"
+      ROS_LOG_DIR: /home/uavx/uavx_runs/ros-logs
+    stop_grace_period: 30s
+volumes:
+  runs:

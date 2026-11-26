@@ -1,0 +1,10 @@
+.git
+**/__pycache__
+**/.pytest_cache
+**/build
+**/install
+**/log
+uavx_runs
+*.pyc
+*.zip
+.env
