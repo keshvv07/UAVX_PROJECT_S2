@@ -24,7 +24,7 @@ USER uavx
 WORKDIR /home/uavx/ardu_ws
 RUN mkdir -p src && vcs import --recursive --input "$GZ_REPOS_URL" src
 # Upstream SITL prerequisites, including Python/Waf dependencies.
-RUN cd src/ardupilot && SKIP_AP_GRAPHIC_ENV=1 SKIP_AP_EXT_ENV=1 SKIP_AP_COV_ENV=1 SKIP_AP_ARM_ENV=1 \
+RUN cd src/ardupilot && USER=uavx LOGNAME=uavx SKIP_AP_GRAPHIC_ENV=1 SKIP_AP_EXT_ENV=1 SKIP_AP_COV_ENV=1 SKIP_AP_ARM_ENV=1 \
     bash Tools/environment_install/install-prereqs-ubuntu.sh -y
 RUN python3 -m pip install --user MAVProxy pymavlink
 RUN git clone --recurse-submodules --branch "$DDS_GEN_REF" https://github.com/ArduPilot/Micro-XRCE-DDS-Gen.git "$HOME/Micro-XRCE-DDS-Gen" && \
