@@ -49,6 +49,12 @@ def _vehicle_sdf(uav: dict, run_dir: str) -> str:
     src = os.path.join(get_package_share_directory("uavx_gazebo"), "models", "uavx_quad", "model.sdf")
     with open(src, encoding="utf-8") as fh:
         sdf = fh.read()
+    # sdformat_urdf cannot resolve package:// in an SDF include. Use the installed
+    # ROS package path so robot_state_publisher and Gazebo load the same airframe.
+    base_model = os.path.join(
+        get_package_share_directory("ardupilot_gazebo"), "models", "iris_with_standoffs"
+    )
+    sdf = sdf.replace("package://ardupilot_gazebo/models/iris_with_standoffs", base_model, 1)
     rgba = " ".join(f"{c:.3f}" for c in list(uav["color"])[:3]) + " 1"
     sdf = sdf.replace("0.1 0.6 1.0 1", rgba)
     if not uav.get("camera", True):
