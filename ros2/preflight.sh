@@ -35,10 +35,16 @@ else bad "$WS/install/setup.bash missing - run: bash ros2/setup_ws.sh"; fi
 set -u
 
 echo "[2] programs"
-for cmd in ros2 gz arducopter micro_ros_agent mavproxy.py; do
+for cmd in ros2 gz arducopter mavproxy.py; do
   if command -v "$cmd" >/dev/null 2>&1; then ok "$cmd"; else bad "$cmd not on PATH"; fi
 done
 if command -v ros2 >/dev/null 2>&1; then
+  # ROS installs package executables under lib/<package>, outside the ordinary PATH.
+  if ros2 pkg executables micro_ros_agent 2>/dev/null | grep -qx 'micro_ros_agent micro_ros_agent'; then
+    ok "micro_ros_agent available through ROS 2"
+  else
+    bad "ROS executable micro_ros_agent not found - build/source the micro_ros_agent package"
+  fi
   PKGS="$(ros2 pkg list 2>/dev/null)"
   for pkg in ardupilot_gz_bringup ardupilot_sitl ros_gz_sim ros_gz_bridge topic_tools \
              uavx_interfaces uavx_gazebo uavx_swarm; do
